@@ -19,20 +19,6 @@
             };
             
             var requestElevator = function (floorNum, direction) {
-                for (var i in elevators) {
-                    var elevator = elevators[i];
-                    
-                    if (elevator.couldStopAtFloor(floorNum, direction)) {
-                        elevator.goToFloor(floorNum);
-                        return;
-                    }
-                }
-                
-                if ((callback = floorListeners.shift())) {
-                    callback(floorNum);
-                    return;
-                }
-                
                 requests[direction].push(floorNum);
             };
             
@@ -119,10 +105,14 @@
                 var goToFloor = function (floorNum, force) {
                     unRegisterFloorListener(floorListener);
                     
+                    if (currentFloor === floorNum) {
+                        return;
+                    }
+                    
                     force = force || false;
                     
                     if (force || elevator.destinationQueue.length === 0) {
-                        direction = floorNum > currentFloor ? Direction.UP : Direction.DOWN;
+                        direction = floorNum >= currentFloor ? Direction.UP : Direction.DOWN;
                         
                         elevator.goingUpIndicator(direction === Direction.UP);
                         elevator.goingDownIndicator(direction === Direction.DOWN);
@@ -141,7 +131,7 @@
                         return true;
                     }
                     
-                    if (elevator.loadFactor() > 0.8) {
+                    if (elevator.loadFactor() > 0.9) {
                         return false;
                     }
                     
@@ -167,7 +157,7 @@
                         floorNum = Math.min.apply(Math, queuedDestinations);
                     }
                     
-                    if (floorNum !== currentFloor) {
+                    if (floorNum !== false && floorNum !== currentFloor) {
                         goToFloor(floorNum, true);
                     }
                 };
@@ -208,6 +198,7 @@
                     
                     if (queuedDestinations.length !== 0) {
                         goToQueuedDestination();
+                        return;
                     }
                     
                     if (elevator.destinationQueue.length === 0) {
