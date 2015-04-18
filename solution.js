@@ -1,194 +1,159 @@
 {
     init: function(elevators, floors) {
-        var FloorsController = (function(){
-            var topFloor = null;
-
+        var MainController = (function () {
+            var Direction = {
+                UP: "up",
+                DOWN: "down",
+                IDLE: "idle"
+            };
+           
+            var floors = [];
+            
+            var elevators = [];
+            
             var requests = {
-                up: [],
-                down: []
+                'up': [],
+                'down': []
             };
-            
-            var setTopFloor = function (floorNum) {
-                topFloor = floorNum;  
-            };
-            
-            var getTopFloor = function () {
-                return topFloor;
-            }
             
             var requestElevator = function (floorNum, direction) {
-                if (requests[direction].indexOf(floorNum) === -1) {
-                    requests[direction].push(floorNum);
-                }
-            };
-            
-            var shouldStop = function (floorNum, direction) {
-                if (direction === null) {
-                    return false;
+                for (var i in elevators) {
+                    var elevator = elevators[i];
+                    
+                    if (elevator.couldStopAtFloor(floorNum, direction)) {
+                        elevator.goToFloor(floorNum);
+                        return;
+                    }
                 }
                 
-                if ((index = requests[direction].indexOf(floorNum)) !== -1) {
+                requests[direction].push(floorNum);
+            };
+            
+            var shouldStopAtFloor = function (floorNum, direction) {
+                if (direction === Direction.IDLE) {
                     return true;
                 }
                 
-                return false;
-            };
-            
-            var setStopped = function (floorNum, direction) {
-                if ((direction === null || direction === Direction.UP) && (index = requests.up.indexOf(floorNum)) !== -1) {
-                    requests.up.splice(index, 1);
+                if ((index = requests[direction].indexOf(floorNum)) === -1) {
+                    return false;
                 }
                 
-                if ((direction === null || direction === Direction.DOWN) && (index = requests.down.indexOf(floorNum)) !== -1) {
-                    requests.down.splice(index, 1);
-                }
-            }
-
-            return {
-                setTopFloor: setTopFloor,
-                getTopFloor: getTopFloor,
-                requestElevator: requestElevator,
-                shouldStop: shouldStop,
-                setStopped: setStopped
-            }
-        })();
-        
-        var Direction = {
-            UP: "up",
-            DOWN: "down"
-        };
-
-        var ElevatorController = (function() {
-            var elevators = [];
+                requests[direction].splice(index, 1);
+                
+                return true;
+            };
             
+            var registerFloor = function (floor) {
+                floors.push(new Floor(floor));
+            };
             
+            var registerElevator = function (elevator) {
+                elevators.push(new Elevator(elevator));
+            };
+            
+            /*
+             * Basic wrapper for custom events etc.
+             */
+            var Floor = function (floor) {
+                var onUpButtonPressed = function () {
+                    requestElevator(floor.floorNum(), Direction.UP);
+                };
+                
+                var onDownButtonPressed = function () {
+                    requestElevator(floor.floorNum(), Direction.DOWN);
+                };
+                
+                floor.on('up_button_pressed', onUpButtonPressed);
+                floor.on('down_button_pressed', onDownButtonPressed);
+            };
+            
+            /*
+             * Basic wrapper for custom events etc.
+             */
             var Elevator = function (elevator) {
-                var direction = null;
+                var direction = Direction.IDLE;
                 
-                var pressedFloors = [];
+                var currentFloor = elevator.currentFloor();
                 
-                elevator.on('idle', function() {
-                    if (elevator.loadFactor() === 0) {
-                        // Set it free
-                        setDirection(null);
-                        goToFloor(elevator.currentFloor());
-                    }
+                var goToFloor = function (floorNum, force) {
+                    force = force || false;
                     
-                    checkForNextFloor();
-                });
-                
-                elevator.on("passing_floor", function (floorNum, direction) {
-                    var shouldStop = false;
-                    
-                    if ((index = pressedFloors.indexOf(floorNum)) !== -1) {
-                        shouldStop = true;
-                    }
-                    
-                    if (FloorsController.shouldStop(floorNum, direction) === true
-                       && elevator.loadFactor() < 0.6) {
-                        shouldStop = true;
-                    }
-                    
-                    if (shouldStop) {
+                    if (force || elevator.destinationQueue.length === 0) {
+                        direction = floorNum > currentFloor ? Direction.UP : Direction.DOWN;
                         elevator.goToFloor(floorNum, true);
-                        elevator.checkDestinationQueue();
-                    }
-                });
-                
-                elevator.on('stopped_at_floor', function (floorNum) {
-                    setIndicators();
-                    FloorsController.setStopped(floorNum, direction);
-                    checkForNextFloor();
-                });
-                
-                elevator.on('floor_button_pressed', function (floorNum) {
-                    if (pressedFloors.indexOf(floorNum) === -1) {
-                        pressedFloors.push(floorNum);
-                    }
-                });
-                
-                var setIndicators = function () {
-                    if (elevator.currentFloor() === 0) {
-                        elevator.goingUpIndicator(true);
-                        elevator.goingDownIndicator(false);
                         return;
                     }
                     
-                    if (elevator.currentFloor() === FloorsController.getTopFloor()) {
-                        elevator.goingUpIndicator(false);
-                        elevator.goingDownIndicator(true);
-                        return;
+                    elevator.goToFloor(floorNum);
+                };
+                
+                var couldStopAtFloor = function (floorNum, requestedDirection) {
+                    if (direction === Direction.IDLE) {
+                        return true;
                     }
                     
-                    if (direction === Direction.UP) {
-                        elevator.goingUpIndicator(true);
-                        elevator.goingDownIndicator(false);
-                        return;   
+                    if (elevator.loadFactor() > 0.8) {
+                        return false;
                     }
-
-                    if (direction === Direction.DOWN) {
-                        elevator.goingUpIndicator(false);
-                        elevator.goingDownIndicator(true);
-                        return;   
+                    
+                    if (direction === requestedDirection) {
+                        var couldStop = (direction === Direction.UP ? (currentFloor <= floorNum) : (currentFloor >= floorNum));
+                        
+                        if (couldStop) {
+                            return true;
+                        }
                     }
-
-                    if (direction === null) {
-                        elevator.goingUpIndicator(true);
-                        elevator.goingDownIndicator(true);
-                        return;   
+                    
+                    return false;
+                };
+                
+                var onIdle = function () {
+                    direction = Direction.IDLE;
+                    
+                    elevator.goingUpIndicator(true);
+                    elevator.goingDownIndicator(true);
+                };
+                
+                var onFloorButtonPressed = function (floorNum) {
+                    goToFloor(floorNum);
+                };
+                
+                var onPassingFloor = function (floorNum, direction) {
+                    currentFloor = floorNum;
+                    
+                    if (couldStopAtFloor(floorNum, direction) && shouldStopAtFloor(floorNum, direction)) {
+                        goToFloor(floorNum, true);
                     }
                 };
                 
-                var setDirection = function (newDirection) {
-                    if (direction !== newDirection) {
-                        direction = newDirection;
-                        setIndicators();
-                    }
-                };
-                
-                var goToFloor = function (floorNum) {
-                    elevator.goToFloor(floorNum, true);
-                    elevator.checkDestinationQueue();
+                var onStoppedAtFloor = function (floorNum) {
+                    currentFloor = floorNum;
+                    
+                    shouldStopAtFloor(currentFloor, direction);
                 }
-               
-                var checkForNextFloor = function () {
-                    if (pressedFloors.length > 0) {
-                        var floorNum = pressedFloors.shift();
-                        setDirection(floorNum > elevator.currentFloor() ? Direction.UP : Direction.DOWN);
-                        goToFloor(floorNum);
-                        return;
-                    }
-                };
                 
-                this.getDirection = function () {
-                    return direction;
-                };
-            };
-            
-            var addElevator = function (elevator) {
-                elevators.push(elevator);  
+                this.goToFloor = goToFloor;
+                this.couldStopAtFloor = couldStopAtFloor;
+                
+                elevator.on('idle', onIdle);
+                elevator.on('floor_button_pressed', onFloorButtonPressed);
+                elevator.on('passing_floor', onPassingFloor);
+                elevator.on('stopped_at_floor ', onStoppedAtFloor);
             };
             
             return {
-                Elevator: Elevator,
-                addElevator: addElevator
-            };
+                registerElevator: registerElevator,
+                registerFloor: registerFloor
+            }
         })();
 
         elevators.forEach(function (elevator) {
-            ElevatorController.addElevator(new ElevatorController.Elevator(elevator));
+            MainController.registerElevator(elevator);
         });
 
         floors.forEach(function (floor) {
-            floor.on("up_button_pressed", function () {
-                FloorsController.requestElevator(floor.floorNum(), Direction.UP);
-            });
-            floor.on("down_button_pressed", function () {
-                FloorsController.requestElevator(floor.floorNum(), Direction.DOWN);
-            });
+            MainController.registerFloor(floor);
         });
-        
-        FloorsController.setTopFloor(floors[floors.length - 1].floorNum());
     },
     update: function(dt, elevators, floors) {
         // We normally don't need to do anything here
