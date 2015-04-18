@@ -11,6 +11,8 @@
             
             var elevators = [];
             
+            var floorListeners = [];
+            
             var requests = {
                 'up': [],
                 'down': []
@@ -26,7 +28,40 @@
                     }
                 }
                 
+                if ((callback = floorListeners.shift())) {
+                    callback(floorNum);
+                    return;
+                }
+                
                 requests[direction].push(floorNum);
+            };
+            
+            /*
+             * @TODO clean up
+             */
+            var registerFloorListener = function (callback) {
+                var floors = requests.up.concat(requests.down);
+                
+                if (floors.length > 0) {
+                    callback(Math.max.apply(Math, floors));
+                    return;
+                }
+                
+                for (var i in floorListeners) {
+                   if (floorListeners[i] === callback) {
+                       return false;
+                   }
+                }
+                
+                floorListeners.push(callback);
+            };
+            
+            var unRegisterFloorListener = function (callback) {
+                for (var i in floorListeners) {
+                    if (floorListeners[i] === callback) {
+                        floorListeners.splice(i, 1);
+                    }
+                }
             };
             
             var shouldStopAtFloor = function (floorNum, direction) {
@@ -75,16 +110,30 @@
                 
                 var currentFloor = elevator.currentFloor();
                 
+                var queuedDestinations = [];
+                
+                var floorListener = function (floorNum) {
+                    goToFloor(floorNum);
+                };
+                
                 var goToFloor = function (floorNum, force) {
+                    unRegisterFloorListener(floorListener);
+                    
                     force = force || false;
                     
                     if (force || elevator.destinationQueue.length === 0) {
                         direction = floorNum > currentFloor ? Direction.UP : Direction.DOWN;
+                        
+                        elevator.goingUpIndicator(direction === Direction.UP);
+                        elevator.goingDownIndicator(direction === Direction.DOWN);
+                        
                         elevator.goToFloor(floorNum, true);
                         return;
                     }
                     
-                    elevator.goToFloor(floorNum);
+                    if (queuedDestinations.indexOf(floorNum)) {
+                        queuedDestinations.push(floorNum);
+                    }
                 };
                 
                 var couldStopAtFloor = function (floorNum, requestedDirection) {
@@ -107,11 +156,29 @@
                     return false;
                 };
                 
+                var goToQueuedDestination = function () {
+                    var floorNum = 0;
+                    
+                    if (direction === Direction.UP && queuedDestinations.length > 0) {
+                        floorNum = Math.max.apply(Math, queuedDestinations);
+                    }
+                    
+                    if (direction === Direction.DOWN && queuedDestinations.length > 0) {
+                        floorNum = Math.min.apply(Math, queuedDestinations);
+                    }
+                    
+                    if (floorNum !== currentFloor) {
+                        goToFloor(floorNum, true);
+                    }
+                };
+                
                 var onIdle = function () {
                     direction = Direction.IDLE;
                     
                     elevator.goingUpIndicator(true);
                     elevator.goingDownIndicator(true);
+                    
+                    registerFloorListener(floorListener);
                 };
                 
                 var onFloorButtonPressed = function (floorNum) {
@@ -120,6 +187,10 @@
                 
                 var onPassingFloor = function (floorNum, direction) {
                     currentFloor = floorNum;
+                    
+                    if (queuedDestinations.indexOf(floorNum) !== -1) {
+                        goToFloor(floorNum, true);
+                    }
                     
                     if (couldStopAtFloor(floorNum, direction) && shouldStopAtFloor(floorNum, direction)) {
                         goToFloor(floorNum, true);
@@ -130,6 +201,18 @@
                     currentFloor = floorNum;
                     
                     shouldStopAtFloor(currentFloor, direction);
+                    
+                    if ((index = queuedDestinations.indexOf(floorNum)) !== -1) {
+                        queuedDestinations.splice(index, 1);
+                    }
+                    
+                    if (queuedDestinations.length !== 0) {
+                        goToQueuedDestination();
+                    }
+                    
+                    if (elevator.destinationQueue.length === 0) {
+                        onIdle();
+                    }
                 }
                 
                 this.goToFloor = goToFloor;
