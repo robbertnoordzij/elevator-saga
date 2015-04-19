@@ -27,14 +27,8 @@
                 return false;
             };
             
-            var processing = false;
-            
             var determineDestination = function (elevator, requestedFloors) {
                 var currentFloor = elevator.getCurrentFloor();
-                
-                if (processing) {
-                    return currentFloor;
-                }
                 
                 var closest = false;
                 
