@@ -1,223 +1,283 @@
 {
     init: function(elevators, floors) {
-        var MainController = (function () {
-            var Direction = {
-                UP: "up",
-                DOWN: "down",
-                IDLE: "idle"
+        var Direction = {
+            UP: "up",
+            DOWN: "down",
+            IDLE: "idle"
+        };
+        
+        var Helper = (function () {
+            var otherElevatorWillStop = function (elevator, floorNum, direction) {
+                var elevators = MainController.getElevators();
+            
+                for (var i in elevators) {
+                    if (elevator === elevators[i]) {
+                        continue;
+                    }
+                    
+                    elevator = elevators[i];
+                    
+                    if (elevator.getDirection() === direction || elevator.getDirection() === Direction.IDLE) {
+                        if (elevator.hasDestinationOrWillPass()) {
+                            return true;
+                        }
+                    }
+                }
+                
+                return false;
             };
-           
+            
+            var determineDestination = function (elevator, requestedFloors) {
+                var currentFloor = elevator.getCurrentFloor();
+                
+                var closest = false;
+                
+                for (var i in requestedFloors) {
+                    var floorNum = requestedFloors[i];
+                    
+                    if (currentFloor === floorNum) {
+                        continue;
+                    }
+                    
+                    if (closest === false || Math.abs(closest - currentFloor) > Math.abs(floorNum - currentFloor)) {
+                        closest = floorNum;
+                    }
+                }
+                
+                if (closest === false) {
+                    var requests = MainController.getRequests();
+                    
+                    for (var direction in requests) {
+                        for (var i in requests[direction]) {
+                            var floorNum = requests[direction][i];
+                            
+                            if (currentFloor === floorNum) {
+                                continue;
+                            }
+                            
+                            if (otherElevatorWillStop(elevator, floorNum, direction)) {
+                                continue;
+                            }
+                            
+                            if (closest === false || Math.abs(closest - currentFloor) > Math.abs(floorNum - currentFloor)) {
+                                closest = floorNum;
+                            }
+                        }
+                    }
+                }
+                
+                if (closest === false) {
+                    return currentFloor;
+                }
+                
+                return closest;
+            };
+            
+            var shouldStop = function (elevator, floorNum, direction) {
+                var requests = MainController.getRequests();
+                
+                if (requests[direction].indexOf(floorNum) === -1) {
+                    return false;
+                }
+                
+                // Check if other elevator will stop here
+                if (otherElevatorWillStop(elevator, floorNum, direction)) {
+                    return false;
+                }
+                
+                return true;
+            };
+            
+            return {
+                determineDestination: determineDestination,
+                shouldStop: shouldStop
+            }
+        })();
+        
+        var MainController = (function () {
             var floors = [];
-            
+
             var elevators = [];
-            
+
             var floorListeners = [];
-            
+
             var requests = {
                 'up': [],
                 'down': []
             };
             
-            var requestElevator = function (floorNum, direction) {
-                requests[direction].push(floorNum);
-            };
-            
-            /*
-             * @TODO clean up
-             */
-            var registerFloorListener = function (callback) {
-                var floors = requests.up.concat(requests.down);
+            var removeFloorFromRequests = function (floorNum, direction) {
+                var direction = direction === Direction.IDLE ? false : direction;
                 
-                if (floors.length > 0) {
-                    callback(Math.max.apply(Math, floors));
-                    return;
+                if (!direction || direction == Direction.UP) {
+                    if ((index = requests.up.indexOf(floorNum)) !== -1) {
+                        requests.up.splice(index, 1);
+                    }
                 }
-                
-                for (var i in floorListeners) {
-                   if (floorListeners[i] === callback) {
-                       return false;
-                   }
-                }
-                
-                floorListeners.push(callback);
-            };
-            
-            var unRegisterFloorListener = function (callback) {
-                for (var i in floorListeners) {
-                    if (floorListeners[i] === callback) {
-                        floorListeners.splice(i, 1);
+
+                if (!direction || direction == Direction.DOWN) {
+                    if ((index = requests.down.indexOf(floorNum)) !== -1) {
+                        requests.down.splice(index, 1);
                     }
                 }
             };
-            
-            var shouldStopAtFloor = function (floorNum, direction) {
-                if (direction === Direction.IDLE) {
-                    return true;
-                }
-                
-                if ((index = requests[direction].indexOf(floorNum)) === -1) {
-                    return false;
-                }
-                
-                requests[direction].splice(index, 1);
-                
-                return true;
+
+            var requestElevator = function (floorNum, direction) {
+                requests[direction].push(floorNum);
             };
             
             var registerFloor = function (floor) {
                 floors.push(new Floor(floor));
             };
-            
+
             var registerElevator = function (elevator) {
                 elevators.push(new Elevator(elevator));
             };
             
-            /*
-             * Basic wrapper for custom events etc.
-             */
+            var getRequests = function () {
+                return requests;
+            };
+            
+            var getElevators = function () {
+                return elevators;
+            };
+
             var Floor = function (floor) {
                 var onUpButtonPressed = function () {
                     requestElevator(floor.floorNum(), Direction.UP);
                 };
-                
+
                 var onDownButtonPressed = function () {
                     requestElevator(floor.floorNum(), Direction.DOWN);
                 };
-                
+
                 floor.on('up_button_pressed', onUpButtonPressed);
                 floor.on('down_button_pressed', onDownButtonPressed);
             };
-            
-            /*
-             * Basic wrapper for custom events etc.
-             */
+
             var Elevator = function (elevator) {
                 var direction = Direction.IDLE;
                 
-                var currentFloor = elevator.currentFloor();
+                var currentDestination = false;
+
+                var requestedFloors = [];
                 
-                var queuedDestinations = [];
+                var self = this;
                 
-                var floorListener = function (floorNum) {
-                    goToFloor(floorNum);
+                var getCurrentFloor = function () {
+                    return elevator.currentFloor();
                 };
                 
-                var goToFloor = function (floorNum, force) {
-                    unRegisterFloorListener(floorListener);
-                    
-                    if (currentFloor === floorNum) {
-                        return;
-                    }
-                    
-                    force = force || false;
-                    
-                    if (force || elevator.destinationQueue.length === 0) {
-                        direction = floorNum >= currentFloor ? Direction.UP : Direction.DOWN;
-                        
-                        elevator.goingUpIndicator(direction === Direction.UP);
-                        elevator.goingDownIndicator(direction === Direction.DOWN);
-                        
-                        elevator.goToFloor(floorNum, true);
-                        return;
-                    }
-                    
-                    if (queuedDestinations.indexOf(floorNum)) {
-                        queuedDestinations.push(floorNum);
-                    }
+                var getDirection = function () {
+                    return direction;  
                 };
                 
-                var couldStopAtFloor = function (floorNum, requestedDirection) {
-                    if (direction === Direction.IDLE) {
+                var hasDestinationOrWillPass = function (floorNum) {
+                    if (currentDestination === floorNum) {
                         return true;
                     }
                     
-                    if (elevator.loadFactor() > 0.9) {
-                        return false;
+                    if (requestedFloors.indexOf(floorNum) !== -1) {
+                        return true;
                     }
                     
-                    if (direction === requestedDirection) {
-                        var couldStop = (direction === Direction.UP ? (currentFloor <= floorNum) : (currentFloor >= floorNum));
-                        
-                        if (couldStop) {
+                    if (elevator.destinationQueue.indexOf(floorNum) !== -1) {
+                        return true;
+                    }
+                    
+                    if (direction === Direction.UP) {
+                        if (elevator.currentFloor() < floorNum && floorNum < currentDestination && elevator.loadFactor() < 0.5) {
                             return true;
-                        }
+                        }   
+                    }
+
+                    if (direction === Direction.DOWN) {
+                        if (elevator.currentFloor() > floorNum && floorNum > currentDestination && elevator.loadFactor() < 0.5) {
+                            return true;
+                        }   
                     }
                     
                     return false;
                 };
-                
-                var goToQueuedDestination = function () {
-                    var floorNum = 0;
+
+                var goToFloor = function (floorNum) {
+                    elevator.destinationQueue = [];
                     
-                    if (direction === Direction.UP && queuedDestinations.length > 0) {
-                        floorNum = Math.max.apply(Math, queuedDestinations);
+                    if (elevator.currentFloor() < floorNum) {
+                        direction = Direction.UP;
+                        
+                        elevator.goingUpIndicator(true);
+                        elevator.goingDownIndicator(false);
+                    } else if (elevator.currentFloor() > floorNum) {
+                        direction = Direction.DOWN;
+                        
+                        elevator.goingUpIndicator(false);
+                        elevator.goingDownIndicator(true);
+                    } else {
+                        elevator.trigger('idle');
                     }
                     
-                    if (direction === Direction.DOWN && queuedDestinations.length > 0) {
-                        floorNum = Math.min.apply(Math, queuedDestinations);
-                    }
+                    currentDestination = floorNum;
                     
-                    if (floorNum !== false && floorNum !== currentFloor) {
-                        goToFloor(floorNum, true);
-                    }
+                    elevator.goToFloor(floorNum);
                 };
-                
+
                 var onIdle = function () {
                     direction = Direction.IDLE;
-                    
+
                     elevator.goingUpIndicator(true);
                     elevator.goingDownIndicator(true);
                     
-                    registerFloorListener(floorListener);
-                };
-                
-                var onFloorButtonPressed = function (floorNum) {
+                    var floorNum = Helper.determineDestination(self, requestedFloors);
                     goToFloor(floorNum);
                 };
-                
-                var onPassingFloor = function (floorNum, direction) {
-                    currentFloor = floorNum;
-                    
-                    if (queuedDestinations.indexOf(floorNum) !== -1) {
-                        goToFloor(floorNum, true);
-                    }
-                    
-                    if (couldStopAtFloor(floorNum, direction) && shouldStopAtFloor(floorNum, direction)) {
-                        goToFloor(floorNum, true);
+
+                var onFloorButtonPressed = function (floorNum) {
+                    if (requestedFloors.indexOf(floorNum) === -1) {
+                        requestedFloors.push(floorNum);    
                     }
                 };
-                
-                var onStoppedAtFloor = function (floorNum) {
-                    currentFloor = floorNum;
+
+                var onPassingFloor = function (floorNum, direction) {
+                    // If people will be getting out here, allow stop
+                    var loadFactorLimit = requestedFloors.indexOf(floorNum) !== -1 ? 0.9 : 0.5;
                     
-                    shouldStopAtFloor(currentFloor, direction);
-                    
-                    if ((index = queuedDestinations.indexOf(floorNum)) !== -1) {
-                        queuedDestinations.splice(index, 1);
+                    if (elevator.loadFactor() < loadFactorLimit) {
+                        if (Helper.shouldStop(self, floorNum, direction)) {
+                            elevator.goToFloor(floorNum, true);    
+                        }
                     }
+                };
+
+                var onStoppedAtFloor = function (floorNum) {
+                    currentDestination = false;
                     
-                    if (queuedDestinations.length !== 0) {
-                        goToQueuedDestination();
-                        return;
+                    if ((index = requestedFloors.indexOf(floorNum)) !== -1) {
+                        requestedFloors.splice(index, 1);    
                     }
                     
                     if (elevator.destinationQueue.length === 0) {
-                        onIdle();
+                        elevator.trigger('idle');
                     }
+                    
+                    removeFloorFromRequests(floorNum, direction);
                 }
-                
-                this.goToFloor = goToFloor;
-                this.couldStopAtFloor = couldStopAtFloor;
-                
+
+                this.getCurrentFloor = getCurrentFloor;
+                this.getDirection = getDirection;
+                this.hasDestinationOrWillPass = hasDestinationOrWillPass;
+
                 elevator.on('idle', onIdle);
                 elevator.on('floor_button_pressed', onFloorButtonPressed);
                 elevator.on('passing_floor', onPassingFloor);
                 elevator.on('stopped_at_floor ', onStoppedAtFloor);
             };
-            
+
             return {
                 registerElevator: registerElevator,
-                registerFloor: registerFloor
+                registerFloor: registerFloor,
+                getRequests: getRequests,
+                getElevators: getElevators
             }
         })();
 
