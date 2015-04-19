@@ -18,7 +18,7 @@
                     elevator = elevators[i];
                     
                     if (elevator.getDirection() === direction || elevator.getDirection() === Direction.IDLE) {
-                        if (elevator.hasDestinationOrWillPass()) {
+                        if (elevator.hasDestinationOrWillPass(floorNum)) {
                             return true;
                         }
                     }
@@ -27,8 +27,14 @@
                 return false;
             };
             
+            var processing = false;
+            
             var determineDestination = function (elevator, requestedFloors) {
                 var currentFloor = elevator.getCurrentFloor();
+                
+                if (processing) {
+                    return currentFloor;
+                }
                 
                 var closest = false;
                 
@@ -91,15 +97,13 @@
             return {
                 determineDestination: determineDestination,
                 shouldStop: shouldStop
-            }
+            };
         })();
         
         var MainController = (function () {
             var floors = [];
 
             var elevators = [];
-
-            var floorListeners = [];
 
             var requests = {
                 'up': [],
@@ -173,7 +177,12 @@
                 };
                 
                 var hasDestinationOrWillPass = function (floorNum) {
-                    if (currentDestination === floorNum) {
+                    if (currentDestination === floorNum && direction === Direction.IDLE) {
+                        console.log("HELLO");
+                        return true;
+                    }
+                    
+                    if (elevator.currentFloor() === floorNum) {
                         return true;
                     }
                     
@@ -186,13 +195,13 @@
                     }
                     
                     if (direction === Direction.UP) {
-                        if (elevator.currentFloor() < floorNum && floorNum < currentDestination && elevator.loadFactor() < 0.5) {
+                        if (elevator.currentFloor() <= floorNum && floorNum <= currentDestination && elevator.loadFactor() < 0.5) {
                             return true;
                         }   
                     }
 
                     if (direction === Direction.DOWN) {
-                        if (elevator.currentFloor() > floorNum && floorNum > currentDestination && elevator.loadFactor() < 0.5) {
+                        if (elevator.currentFloor() >= floorNum && floorNum >= currentDestination && elevator.loadFactor() < 0.5) {
                             return true;
                         }   
                     }
@@ -239,8 +248,13 @@
                 };
 
                 var onPassingFloor = function (floorNum, direction) {
+                    if (requestedFloors.indexOf(floorNum) !== -1) {
+                        elevator.goToFloor(floorNum, true);
+                        return;
+                    }
+                    
                     // If people will be getting out here, allow stop
-                    var loadFactorLimit = requestedFloors.indexOf(floorNum) !== -1 ? 0.9 : 0.5;
+                    var loadFactorLimit = requestedFloors.indexOf(floorNum) !== -1 ? 1 : 0.7;
                     
                     if (elevator.loadFactor() < loadFactorLimit) {
                         if (Helper.shouldStop(self, floorNum, direction)) {
